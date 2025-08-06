@@ -1,371 +1,300 @@
 import gradio as gr
-import fitz  # PyMuPDF for PDF processing
-import requests
-import json
 import os
-from typing import List, Dict, Tuple
-import re
-from datetime import datetime
-import time
+from utils import (
+    extract_text_from_pdf, 
+    analyze_cv_with_gemini,
+    search_real_jobs,
+    format_comprehensive_results
+)
 
-# Configuration des API gratuites
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # L'utilisateur devra fournir sa clé
-SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")  # Clé API pour la recherche web
-
-class CVAnalyzer:
-    """Analyse les CV en utilisant Groq (API LLM gratuite)"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
+def analyze_cv_and_search_jobs(pdf_file, country):
+    """Main function to analyze CV and search for jobs with advanced insights"""
+    try:
+        # Extract text from PDF
+        cv_text = extract_text_from_pdf(pdf_file.name)
         
-    def extract_text_from_pdf(self, pdf_path: str) -> str:
-        """Extrait le texte d'un PDF"""
-        try:
-            pdf_document = fitz.open(pdf_path)
-            text = ""
-            for page_num in range(len(pdf_document)):
-                page = pdf_document[page_num]
-                text += page.get_text()
-            pdf_document.close()
-            return text
-        except Exception as e:
-            return f"Erreur lors de la lecture du PDF: {str(e)}"
-    
-    def analyze_cv(self, cv_text: str) -> Dict:
-        """Analyse le CV et extrait les informations clés"""
-        prompt = f"""Analyse ce CV et extrais les informations suivantes en format JSON:
-        - skills: liste des compétences techniques et soft skills
-        - experience_level: junior/mid/senior
-        - job_titles: titres de postes pertinents pour cette personne
-        - industries: secteurs d'activité pertinents
-        - languages: langues parlées
-        - education_level: niveau d'études
+        # Analyze CV with Gemini (completely free API)
+        analysis_result = analyze_cv_with_gemini(cv_text)
         
-        CV:
-        {cv_text[:3000]}  # Limite pour éviter de dépasser les tokens
+        # Generate search query from analysis
+        skills = analysis_result.get("skills_analysis", {}).get("technical_skills", [])
+        titles = analysis_result.get("job_recommendations", [])
         
-        Réponds UNIQUEMENT avec le JSON, sans texte supplémentaire."""
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "model": "mixtral-8x7b-32768",
-            "messages": [
-                {"role": "system", "content": "Tu es un expert en analyse de CV. Réponds toujours en JSON valide."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "max_tokens": 1000
-        }
-        
-        try:
-            response = requests.post(self.base_url, headers=headers, json=data)
-            response.raise_for_status()
-            result = response.json()
-            content = result['choices'][0]['message']['content']
-            
-            # Nettoyer et parser le JSON
-            content = re.sub(r'^```json\s*', '', content)
-            content = re.sub(r'\s*```$', '', content)
-            
-            return json.loads(content)
-        except Exception as e:
-            return {
-                "error": f"Erreur d'analyse: {str(e)}",
-                "skills": [],
-                "job_titles": ["Professionnel"],
-                "experience_level": "mid",
-                "industries": [],
-                "languages": [],
-                "education_level": "bachelor"
-            }
-
-class JobSearcher:
-    """Recherche d'emplois en utilisant Serper API (gratuit jusqu'à 2500 requêtes/mois)"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://serpapi.com/search"
-        
-    def search_jobs(self, query: str, country: str, num_results: int = 10) -> List[Dict]:
-        """Recherche des offres d'emploi"""
-        # Utilisation de l'API Serper pour la recherche
-        headers = {
-            "X-API-KEY": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        # Adapter la requête selon le pays
-        country_domains = {
-            "France": "site:indeed.fr OR site:linkedin.com/jobs OR site:welcometothejungle.com",
-            "USA": "site:indeed.com OR site:linkedin.com/jobs OR site:glassdoor.com",
-            "UK": "site:indeed.co.uk OR site:linkedin.com/jobs OR site:reed.co.uk",
-            "Canada": "site:indeed.ca OR site:linkedin.com/jobs OR site:workopolis.com",
-            "Germany": "site:indeed.de OR site:linkedin.com/jobs OR site:stepstone.de",
-            "Spain": "site:indeed.es OR site:linkedin.com/jobs OR site:infojobs.net"
-        }
-        
-        search_query = f"{query} job offer {country_domains.get(country, 'site:linkedin.com/jobs')}"
-        
-        data = {
-            "q": search_query,
-            "gl": country.lower()[:2],
-            "num": num_results
-        }
-        
-        try:
-            response = requests.post(
-                "https://serpapi.com/search.json",
-                json=data,
-                headers=headers
-            )
-            response.raise_for_status()
-            results = response.json()
-            
-            jobs = []
-            for result in results.get('organic', []):
-                job = {
-                    "title": result.get('title', ''),
-                    "company": result.get('source', ''),
-                    "link": result.get('link', ''),
-                    "snippet": result.get('snippet', ''),
-                    "date": result.get('date', '')
-                }
-                jobs.append(job)
-            
-            return jobs
-            
-        except Exception as e:
-            # Si Serper échoue, utiliser une approche alternative avec DuckDuckGo
-            return self.search_jobs_duckduckgo(query, country, num_results)
-    
-    def search_jobs_duckduckgo(self, query: str, country: str, num_results: int = 10) -> List[Dict]:
-        """Recherche alternative avec DuckDuckGo (sans API key)"""
-        try:
-            from duckduckgo_search import DDGS
-            
-            ddgs = DDGS()
-            
-            # Adapter la requête pour cibler les offres d'emploi
-            search_query = f"{query} job offer vacancy hiring {country}"
-            
-            results = ddgs.text(
-                search_query,
-                region=country.lower()[:2] + "-" + country.lower()[:2],
-                max_results=num_results
-            )
-            
-            jobs = []
-            for r in results:
-                job = {
-                    "title": r.get('title', ''),
-                    "company": r.get('source', 'N/A'),
-                    "link": r.get('link', ''),
-                    "snippet": r.get('body', ''),
-                    "date": "Recent"
-                }
-                jobs.append(job)
-            
-            return jobs
-            
-        except Exception as e:
-            return [{
-                "title": "Erreur de recherche",
-                "company": "N/A",
-                "link": "#",
-                "snippet": f"Erreur: {str(e)}. Veuillez vérifier votre connexion internet.",
-                "date": "N/A"
-            }]
-
-class CVJobMatcher:
-    """Classe principale pour l'application"""
-    
-    def __init__(self):
-        self.cv_analyzer = None
-        self.job_searcher = None
-        
-    def setup_apis(self, groq_key: str, serper_key: str):
-        """Configure les APIs avec les clés fournies"""
-        self.cv_analyzer = CVAnalyzer(groq_key)
-        self.job_searcher = JobSearcher(serper_key)
-        
-    def generate_search_queries(self, cv_analysis: Dict) -> List[str]:
-        """Génère des requêtes de recherche optimisées basées sur l'analyse du CV"""
-        queries = []
-        
-        # Requêtes basées sur les titres de postes
-        for title in cv_analysis.get('job_titles', [])[:3]:
-            queries.append(f'"{title}"')
-        
-        # Requêtes combinant compétences et niveau d'expérience
-        skills = cv_analysis.get('skills', [])[:5]
-        exp_level = cv_analysis.get('experience_level', 'mid')
-        
+        search_terms = []
         if skills:
-            skill_query = f"{exp_level} {' '.join(skills[:3])}"
-            queries.append(skill_query)
+            search_terms.extend(skills[:5])
+        if titles:
+            search_terms.extend([t.get('role', '') for t in titles[:3]])
         
-        # Requête par industrie
-        for industry in cv_analysis.get('industries', [])[:2]:
-            queries.append(f"{industry} jobs")
+        search_query = " ".join(search_terms) if search_terms else "software developer"
         
-        return queries[:5]  # Limiter à 5 requêtes
-    
-    def process_cv_and_search(self, pdf_file, country: str, groq_key: str, serper_key: str) -> Tuple[str, str]:
-        """Traite le CV et recherche des emplois"""
-        try:
-            # Vérifier les clés API
-            if not groq_key:
-                return "❌ Erreur: Clé API Groq manquante", ""
-            
-            # Configurer les APIs
-            self.setup_apis(groq_key, serper_key)
-            
-            # Extraire le texte du CV
-            cv_text = self.cv_analyzer.extract_text_from_pdf(pdf_file.name)
-            if "Erreur" in cv_text:
-                return cv_text, ""
-            
-            # Analyser le CV
-            analysis_result = self.cv_analyzer.analyze_cv(cv_text)
-            
-            if "error" in analysis_result:
-                return f"❌ {analysis_result['error']}", ""
-            
-            # Générer l'analyse formatée
-            analysis_output = f"""📊 **Analyse du CV**
+        # Search for real jobs
+        jobs = search_real_jobs(search_query, country)
+        
+        # Format comprehensive results
+        formatted_results = format_comprehensive_results(analysis_result, jobs, country)
+        
+        return formatted_results
+        
+    except Exception as e:
+        return f"""
+# ❌ Error Processing Request
 
-**Niveau d'expérience:** {analysis_result.get('experience_level', 'N/A')}
-**Niveau d'études:** {analysis_result.get('education_level', 'N/A')}
+**Error Message:** {str(e)}
 
-**Compétences identifiées:**
-{chr(10).join(['• ' + skill for skill in analysis_result.get('skills', [])])}
+## 🛠 Troubleshooting Tips:
 
-**Titres de postes suggérés:**
-{chr(10).join(['• ' + title for title in analysis_result.get('job_titles', [])])}
+1. **File Issues:**
+   - Ensure your CV is in PDF format
+   - Check that the file is not corrupted
+   - Try a different CV file
+   - Keep file size under 10MB
 
-**Secteurs d'activité:**
-{chr(10).join(['• ' + industry for industry in analysis_result.get('industries', [])])}
+2. **API Issues:**
+   - Gemini API is completely free - get your key at: https://ai.google.dev/
+   - Set your API key in the environment variables
+   - Check internet connectivity
 
-**Langues:**
-{chr(10).join(['• ' + lang for lang in analysis_result.get('languages', [])])}
+3. **Retry Steps:**
+   - Refresh the page
+   - Clear browser cache
+   - Try a different browser
+   - Wait a few minutes and try again
+
+## 📞 Support
+
+If problems persist, please:
+- Check the browser console for detailed errors
+- Ensure you're using the latest version of this tool
+- Contact support with the error details above
+
+*This tool works completely free with no hidden costs!*
 """
-            
-            # Générer les requêtes de recherche
-            search_queries = self.generate_search_queries(analysis_result)
-            
-            # Rechercher des emplois
-            all_jobs = []
-            for query in search_queries:
-                jobs = self.job_searcher.search_jobs(query, country, num_results=5)
-                all_jobs.extend(jobs)
-                time.sleep(0.5)  # Éviter le rate limiting
-            
-            # Dédupliquer par URL
-            unique_jobs = {job['link']: job for job in all_jobs}.values()
-            
-            # Formater les résultats
-            jobs_output = f"""🔍 **Offres d'emploi trouvées ({len(unique_jobs)} résultats)**
 
-**Pays de recherche:** {country}
-**Requêtes utilisées:** {', '.join(search_queries)}
-
----
-
-"""
-            
-            for i, job in enumerate(list(unique_jobs)[:20], 1):
-                jobs_output += f"""**{i}. {job['title']}**
-🏢 {job['company']}
-📅 {job['date']}
-📝 {job['snippet'][:200]}...
-🔗 [Voir l'offre]({job['link']})
-
----
-
-"""
-            
-            return analysis_output, jobs_output
-            
-        except Exception as e:
-            return f"❌ Erreur inattendue: {str(e)}", ""
-
-# Créer l'application Gradio
-def create_app():
-    matcher = CVJobMatcher()
+# Create Gradio interface
+with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
+    gr.Markdown("""
+    # 🚀 Advanced CV Job Matcher (AI Powered)
     
-    with gr.Blocks(title="CV Job Matcher - Analyseur de CV et Recherche d'Emploi") as app:
-        gr.Markdown("""
-        # 🎯 CV Job Matcher
-        
-        Cette application analyse votre CV et trouve des offres d'emploi correspondantes.
-        
-        ## 🔧 Configuration requise:
-        1. **Clé API Groq** (gratuite): [Obtenir une clé](https://console.groq.com/keys)
-        2. **Clé API Serper** (optionnelle): [Obtenir une clé](https://serper.dev/) - 2500 recherches gratuites/mois
-        
-        Sans clé Serper, l'app utilisera DuckDuckGo (moins précis mais gratuit).
-        """)
-        
-        with gr.Row():
-            with gr.Column():
-                groq_key = gr.Textbox(
-                    label="Clé API Groq (obligatoire)",
-                    placeholder="gsk_...",
-                    type="password"
-                )
-                serper_key = gr.Textbox(
-                    label="Clé API Serper (optionnelle)",
-                    placeholder="Laissez vide pour utiliser DuckDuckGo",
-                    type="password"
-                )
-        
-        with gr.Row():
-            with gr.Column():
-                cv_file = gr.File(
-                    label="📄 Téléchargez votre CV (PDF)",
-                    file_types=[".pdf"]
-                )
-                country = gr.Dropdown(
-                    label="🌍 Pays de recherche",
-                    choices=["France", "USA", "UK", "Canada", "Germany", "Spain"],
-                    value="France"
-                )
-                search_btn = gr.Button("🚀 Analyser et Rechercher", variant="primary")
-        
-        with gr.Row():
-            with gr.Column():
-                analysis_output = gr.Markdown(label="Analyse du CV")
-            with gr.Column():
-                jobs_output = gr.Markdown(label="Offres d'emploi")
-        
-        search_btn.click(
-            fn=matcher.process_cv_and_search,
-            inputs=[cv_file, country, groq_key, serper_key],
-            outputs=[analysis_output, jobs_output]
-        )
-        
-        gr.Markdown("""
-        ---
-        
-        ## 📝 Notes:
-        - L'analyse est limitée aux 3000 premiers caractères du CV pour économiser les tokens
-        - Les résultats de recherche dépendent de la qualité des APIs utilisées
-        - Pour de meilleurs résultats, utilisez un CV bien structuré en PDF
-        
-        ## 🔒 Confidentialité:
-        - Vos données ne sont pas stockées
-        - Les clés API restent dans votre navigateur
-        - Le CV est traité uniquement pendant la session
-        """)
+    ## The Most Advanced Free Job Matching Tool
     
+    Upload your CV and get **AI-powered insights**, **real job opportunities**, and **personalized career advice**!
+    
+    _Powered by Gemini AI (completely free) + Real Job APIs_
+    """)
+    
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("### 📤 Upload Your CV")
+            pdf_input = gr.File(
+                label="📄 CV (PDF format only)", 
+                file_types=[".pdf"],
+                type="file"
+            )
+            
+            gr.Markdown("### 🌍 Location Preferences")
+            country_input = gr.Dropdown(
+                choices=["", "Remote", "USA", "UK", "Canada", "Germany", "France", "Australia", "India", "Brazil", "Other"],
+                value="",
+                label="Preferred Location (Optional)"
+            )
+            
+            custom_country = gr.Textbox(
+                label="Custom Location (if Other selected)",
+                placeholder="e.g., Netherlands, Singapore, etc."
+            )
+            
+            with gr.Row():
+                search_button = gr.Button("🔍 AI Analyze & Find Jobs", variant="primary", size="lg")
+                clear_button = gr.Button("🧹 Clear All")
+            
+            gr.Markdown("""
+            ### 🎯 What You Get:
+            - **AI-Powered CV Analysis** with detailed insights
+            - **Real Job Opportunities** from actual job boards
+            - **Personalized Career Advice** tailored to your profile
+            - **CV Improvement Suggestions** to boost your chances
+            - **Market Trends** and salary benchmarks
+            """)
+        
+        with gr.Column(scale=2):
+            output = gr.Markdown(
+                label="📊 Comprehensive Results",
+                value="""
+                # 🚀 Ready for Advanced Job Matching?
+                
+                ## What This Tool Provides:
+                
+                ### 🤖 AI-Powered Analysis
+                - Deep CV analysis with Gemini AI
+                - Skills assessment and gap identification
+                - Experience evaluation and career progression insights
+                
+                ### 💼 Real Job Opportunities
+                - Live job listings from actual job boards
+                - Direct links to apply
+                - Salary information and job details
+                
+                ### 📝 Personalized Recommendations
+                - Tailored career advice
+                - CV improvement suggestions
+                - Market trends and opportunities
+                
+                ### 🎯 How to Get Started:
+                1. Upload your CV (PDF format)
+                2. Select your preferred location (optional)
+                3. Click "AI Analyze & Find Jobs"
+                4. Get comprehensive career insights!
+                
+                ---
+                
+                **Note:** This tool uses completely free APIs. For the best experience, get a free Gemini API key from [Google AI Studio](https://ai.google.dev/).
+                """
+            )
+    
+    def process_location(country, custom_country):
+        if country == "Other" and custom_country:
+            return custom_country
+        return country if country else ""
+    
+    search_button.click(
+        fn=lambda pdf, country, custom: analyze_cv_and_search_jobs(pdf, process_location(country, custom)),
+        inputs=[pdf_input, country_input, custom_country],
+        outputs=output
+    )
+    
+    clear_button.click(
+        fn=lambda: [
+            None, 
+            "", 
+            "",
+            """
+            # 🚀 Ready for Advanced Job Matching?
+            
+            ## What This Tool Provides:
+            
+            ### 🤖 AI-Powered Analysis
+            - Deep CV analysis with Gemini AI
+            - Skills assessment and gap identification
+            - Experience evaluation and career progression insights
+            
+            ### 💼 Real Job Opportunities
+            - Live job listings from actual job boards
+            - Direct links to apply
+            - Salary information and job details
+            
+            ### 📝 Personalized Recommendations
+            - Tailored career advice
+            - CV improvement suggestions
+            - Market trends and opportunities
+            
+            ### 🎯 How to Get Started:
+            1. Upload your CV (PDF format)
+            2. Select your preferred location (optional)
+            3. Click "AI Analyze & Find Jobs"
+            4. Get comprehensive career insights!
+            
+            ---
+            
+            **Note:** This tool uses completely free APIs. For the best experience, get a free Gemini API key from [Google AI Studio](https://ai.google.dev/).
+            """
+        ],
+        inputs=[],
+        outputs=[pdf_input, country_input, custom_country, output]
+    )
+    
+    gr.Markdown("""
+    ---
+    
+    ## 🌟 Why This Tool is Different
+    
+    ### 🔥 Advanced AI Analysis
+    - **Gemini AI** (completely free with generous limits)
+    - Professional-grade CV analysis
+    - Detailed skills and experience assessment
+    - Personalized career recommendations
+    
+    ### 💼 Real Job Integration
+    - Connects to actual job boards
+    - Live job listings updated in real-time
+    - Direct application links
+    - Location-based filtering
+    
+    ### 📊 Comprehensive Insights
+    - Market trends and salary benchmarks
+    - CV improvement suggestions with priorities
+    - Career progression analysis
+    - Personalized advice and strategies
+    
+    ### 🆓 100% Free & Privacy-Focused
+    - **No subscription fees**
+    - **No hidden costs**
+    - **No data storage**
+    - **Privacy-first design**
+    
+    ## 🚀 Get Your Free Gemini API Key
+    
+    1. Go to [Google AI Studio](https://ai.google.dev/)
+    2. Sign in with your Google account
+    3. Get your free API key (no credit card required)
+    4. Set it as `GEMINI_API_KEY` in your environment
+    
+    **Free Tier Includes:**
+    - 60 requests per minute
+    - 2 million tokens per day
+    - Access to Gemini Pro model
+    - No expiration
+    
+    ---
+    
+    Made with ❤️ using cutting-edge AI technology
+    """)
+    
+    # Add custom CSS for better styling
+    app.style = """
+        .gradio-container {
+            max-width: 1200px !important;
+        }
+        h1 {
+            color: #1f2937;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 10px;
+        }
+        .markdown {
+            line-height: 1.6;
+        }
+        button.primary {
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+            border: none;
+            color: white;
+            font-weight: bold;
+        }
+    """
+
+# For Colab deployment
+def create_colab_app():
+    """Create app specifically for Colab deployment"""
     return app
 
-# Point d'entrée principal
 if __name__ == "__main__":
-    app = create_app()
-    app.launch(share=True, server_name="0.0.0.0")
+    # Check if running in Colab
+    try:
+        import google.colab
+        IN_COLAB = True
+    except ImportError:
+        IN_COLAB = False
+    
+    if IN_COLAB:
+        # In Colab, provide instructions for API key
+        import os
+        if not os.getenv('GEMINI_API_KEY'):
+            print("⚠️  No Gemini API key found.")
+            print("To use advanced AI analysis:")
+            print("1. Get your FREE API key from: https://ai.google.dev/")
+            print("2. In Colab, go to Runtime > Run All")
+            print("3. When prompted, enter your API key")
+            print("\nUsing mock analysis for now...")
+        
+        app.launch(share=True, inline=False)
+    else:
+        app.launch(share=True, inline=False)
