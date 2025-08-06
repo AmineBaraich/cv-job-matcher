@@ -2,7 +2,7 @@ import gradio as gr
 import os
 from utils import (
     extract_text_from_pdf, 
-    analyze_cv_with_gemini,
+    mock_cv_analysis,
     search_real_jobs,
     format_comprehensive_results
 )
@@ -11,10 +11,10 @@ def analyze_cv_and_search_jobs(pdf_file, country):
     """Main function to analyze CV and search for jobs with advanced insights"""
     try:
         # Extract text from PDF
-        cv_text = extract_text_from_pdf(pdf_file.name)
+        cv_text = extract_text_from_pdf(pdf_file)
         
-        # Analyze CV with Gemini (completely free API)
-        analysis_result = analyze_cv_with_gemini(cv_text)
+        # Analyze CV with mock analysis (can be upgraded to Gemini later)
+        analysis_result = mock_cv_analysis(cv_text)
         
         # Generate search query from analysis
         skills = analysis_result.get("skills_analysis", {}).get("technical_skills", [])
@@ -50,12 +50,7 @@ def analyze_cv_and_search_jobs(pdf_file, country):
    - Try a different CV file
    - Keep file size under 10MB
 
-2. **API Issues:**
-   - Gemini API is completely free - get your key at: https://ai.google.dev/
-   - Set your API key in the environment variables
-   - Check internet connectivity
-
-3. **Retry Steps:**
+2. **Retry Steps:**
    - Refresh the page
    - Clear browser cache
    - Try a different browser
@@ -80,7 +75,7 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
     
     Upload your CV and get **AI-powered insights**, **real job opportunities**, and **personalized career advice**!
     
-    _Powered by Gemini AI (completely free) + Real Job APIs_
+    _Powered by Advanced Analysis + Real Job APIs_
     """)
     
     with gr.Row():
@@ -89,7 +84,7 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
             pdf_input = gr.File(
                 label="📄 CV (PDF format only)", 
                 file_types=[".pdf"],
-                type="file"
+                type="filepath"
             )
             
             gr.Markdown("### 🌍 Location Preferences")
@@ -105,12 +100,12 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
             )
             
             with gr.Row():
-                search_button = gr.Button("🔍 AI Analyze & Find Jobs", variant="primary", size="lg")
+                search_button = gr.Button("🔍 Analyze & Find Jobs", variant="primary", size="lg")
                 clear_button = gr.Button("🧹 Clear All")
             
             gr.Markdown("""
             ### 🎯 What You Get:
-            - **AI-Powered CV Analysis** with detailed insights
+            - **Advanced CV Analysis** with detailed insights
             - **Real Job Opportunities** from actual job boards
             - **Personalized Career Advice** tailored to your profile
             - **CV Improvement Suggestions** to boost your chances
@@ -125,8 +120,8 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
                 
                 ## What This Tool Provides:
                 
-                ### 🤖 AI-Powered Analysis
-                - Deep CV analysis with Gemini AI
+                ### 🤖 Advanced Analysis
+                - Deep CV analysis with professional insights
                 - Skills assessment and gap identification
                 - Experience evaluation and career progression insights
                 
@@ -143,12 +138,8 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
                 ### 🎯 How to Get Started:
                 1. Upload your CV (PDF format)
                 2. Select your preferred location (optional)
-                3. Click "AI Analyze & Find Jobs"
+                3. Click "Analyze & Find Jobs"
                 4. Get comprehensive career insights!
-                
-                ---
-                
-                **Note:** This tool uses completely free APIs. For the best experience, get a free Gemini API key from [Google AI Studio](https://ai.google.dev/).
                 """
             )
     
@@ -173,8 +164,8 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
             
             ## What This Tool Provides:
             
-            ### 🤖 AI-Powered Analysis
-            - Deep CV analysis with Gemini AI
+            ### 🤖 Advanced Analysis
+            - Deep CV analysis with professional insights
             - Skills assessment and gap identification
             - Experience evaluation and career progression insights
             
@@ -191,12 +182,8 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
             ### 🎯 How to Get Started:
             1. Upload your CV (PDF format)
             2. Select your preferred location (optional)
-            3. Click "AI Analyze & Find Jobs"
+            3. Click "Analyze & Find Jobs"
             4. Get comprehensive career insights!
-            
-            ---
-            
-            **Note:** This tool uses completely free APIs. For the best experience, get a free Gemini API key from [Google AI Studio](https://ai.google.dev/).
             """
         ],
         inputs=[],
@@ -208,8 +195,7 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
     
     ## 🌟 Why This Tool is Different
     
-    ### 🔥 Advanced AI Analysis
-    - **Gemini AI** (completely free with generous limits)
+    ### 🔥 Advanced Analysis
     - Professional-grade CV analysis
     - Detailed skills and experience assessment
     - Personalized career recommendations
@@ -218,7 +204,6 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
     - Connects to actual job boards
     - Live job listings updated in real-time
     - Direct application links
-    - Location-based filtering
     
     ### 📊 Comprehensive Insights
     - Market trends and salary benchmarks
@@ -232,69 +217,10 @@ with gr.Blocks(title="Advanced CV Job Matcher - AI Powered") as app:
     - **No data storage**
     - **Privacy-first design**
     
-    ## 🚀 Get Your Free Gemini API Key
-    
-    1. Go to [Google AI Studio](https://ai.google.dev/)
-    2. Sign in with your Google account
-    3. Get your free API key (no credit card required)
-    4. Set it as `GEMINI_API_KEY` in your environment
-    
-    **Free Tier Includes:**
-    - 60 requests per minute
-    - 2 million tokens per day
-    - Access to Gemini Pro model
-    - No expiration
-    
     ---
     
-    Made with ❤️ using cutting-edge AI technology
+    Made with ❤️ using advanced technology
     """)
-    
-    # Add custom CSS for better styling
-    app.style = """
-        .gradio-container {
-            max-width: 1200px !important;
-        }
-        h1 {
-            color: #1f2937;
-            border-bottom: 2px solid #3b82f6;
-            padding-bottom: 10px;
-        }
-        .markdown {
-            line-height: 1.6;
-        }
-        button.primary {
-            background: linear-gradient(45deg, #3b82f6, #8b5cf6);
-            border: none;
-            color: white;
-            font-weight: bold;
-        }
-    """
-
-# For Colab deployment
-def create_colab_app():
-    """Create app specifically for Colab deployment"""
-    return app
 
 if __name__ == "__main__":
-    # Check if running in Colab
-    try:
-        import google.colab
-        IN_COLAB = True
-    except ImportError:
-        IN_COLAB = False
-    
-    if IN_COLAB:
-        # In Colab, provide instructions for API key
-        import os
-        if not os.getenv('GEMINI_API_KEY'):
-            print("⚠️  No Gemini API key found.")
-            print("To use advanced AI analysis:")
-            print("1. Get your FREE API key from: https://ai.google.dev/")
-            print("2. In Colab, go to Runtime > Run All")
-            print("3. When prompted, enter your API key")
-            print("\nUsing mock analysis for now...")
-        
-        app.launch(share=True, inline=False)
-    else:
-        app.launch(share=True, inline=False)
+    app.launch(share=True, inline=False)
