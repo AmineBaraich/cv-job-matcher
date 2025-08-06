@@ -1,3 +1,4 @@
+# utils.py
 import os
 import re
 import json
@@ -170,21 +171,39 @@ def analyze_cv_with_gemini(cv_text: str) -> Dict:
         return mock_cv_analysis(cv_text)
 
 # --- Job Search ---
-def search_jobs_duckduckgo(query: str, max_results: int = 5) -> List[Dict]:
+def search_real_jobs(query: str, country: str = "") -> List[Dict]:
     """Searches for jobs using DuckDuckGo."""
     jobs = []
     try:
+        # Refine the search query for jobs
+        search_query = f"job {query}"
+        if country:
+            search_query += f" in {country}"
+            
         with DDGS() as ddgs:
-            results = ddgs.text(f"job {query}", max_results=max_results)
+            # Increase max_results if needed, but be mindful of rate limits
+            results = ddgs.text(search_query, max_results=10) 
             for r in results:
                  # Basic filtering to try and get job-related results
-                if any(keyword in r['title'].lower() or keyword in r['body'].lower() for keyword in ['job', 'hiring', 'position', 'opening', 'career']):
+                title_lower = r.get('title', '').lower()
+                body_lower = r.get('body', '').lower()
+                if any(keyword in title_lower or keyword in body_lower for keyword in ['job', 'hiring', 'position', 'opening', 'career', 'employment']):
+                    # Construct a more informative job entry
+                    job_title = r.get('title', 'N/A')
+                    job_url = r.get('href', '#')
+                    description_snippet = r.get('body', 'N/A')[:200] + '...'
+                    
+                    # Heuristics for company and location (often not perfectly extracted by DDGS text)
+                    company = "Company not specified"
+                    location = country if country else "Location not specified"
+                    # You could try to extract company/location from title/body if needed, but it's complex.
+                    
                     jobs.append({
-                        "title": r.get('title', 'N/A'),
-                        "company": "Company not specified", # DDGS text search doesn't reliably extract company
-                        "location": "Location not specified", # DDGS text search doesn't reliably extract location
-                        "description": r.get('body', 'N/A')[:200] + '...',
-                        "url": r.get('href', '#'),
+                        "title": job_title,
+                        "company": company,
+                        "location": location,
+                        "description": description_snippet,
+                        "url": job_url,
                         "salary": "Not specified",
                         "posted_date": "N/A",
                         "job_type": "N/A"
@@ -192,7 +211,36 @@ def search_jobs_duckduckgo(query: str, max_results: int = 5) -> List[Dict]:
         return jobs
     except Exception as e:
         print(f"Error searching jobs with DuckDuckGo: {e}")
-        return []
+        # Return mock jobs if real search fails
+        return get_mock_jobs(query, country)
+
+def get_mock_jobs(query: str, country: str = "") -> List[Dict]:
+    """Mock jobs when real APIs fail or for testing."""
+    base_location = country if country else "Remote/Global"
+    
+    jobs = [
+        {
+            "title": f"Relevant Role for '{query}'",
+            "company": "Tech Innovations Inc",
+            "location": base_location,
+            "description": f"This is a mock job listing related to your search '{query}'. In a production environment, this would be a real job found via search.",
+            "url": "https://www.linkedin.com/jobs/",
+            "salary": "$80,000 - $130,000",
+            "posted_date": "Recently",
+            "job_type": "Full-time"
+        },
+        {
+            "title": "Another Great Opportunity",
+            "company": "Data Insights Corp",
+            "location": base_location,
+            "description": "Apply your skills in a dynamic environment. This is a placeholder job listing.",
+            "url": "https://stackoverflow.com/jobs",
+            "salary": "$90,000 - $140,000",
+            "posted_date": "2 days ago",
+            "job_type": "Contract"
+        }
+    ]
+    return jobs
 
 # --- Results Formatting ---
 def format_comprehensive_results(analysis_result: Dict, jobs: List[Dict], country: str) -> str:
